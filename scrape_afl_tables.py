@@ -336,5 +336,8 @@ def update_season_incremental(season: int, out_path: str = TEAM_CACHE) -> pd.Dat
 # Run
 # ----------------------------
 if __name__ == "__main__":
-    update_season_incremental(2026, TEAM_CACHE)
+    from datetime import date
+    # AFL seasons run ~March-September; use current year
+    season = date.today().year
+    update_season_incremental(season, TEAM_CACHE)
 

@@ -8,6 +8,7 @@ on:
 jobs:
   scrape:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: write
 
@@ -23,7 +24,14 @@ jobs:
         run: pip install requests beautifulsoup4 pandas lxml
 
       - name: Run scraper
-        run: python scrape_afl_tables.py
+        run: python scrape_afl_tables.py 2>&1 | tee scrape_output.log
+
+      - name: Fail if all new matches errored
+        run: |
+          if grep -q "FAIL" scrape_output.log && ! grep -q "] OK " scrape_output.log; then
+            echo "::error::All new match scrapes failed — check AFL Tables availability."
+            exit 1
+          fi
 
       - name: Commit updated data if changed
         run: |
