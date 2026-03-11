@@ -78,16 +78,13 @@ def build_elo_and_form(train_hist, full_hist, team_log):
     elos = compute_current_elos(played, k=ELO_K, home_adv=ELO_HOME_ADV, base=ELO_BASE)
     snap = latest_form_snapshot(team_log, model_stats=MODEL_STATS, form_windows=FORM_WINDOWS)
 
-    # Compute previous-round ELOs by excluding the last round of matches
+    # Compute previous-round ELOs by excluding the last round of matches.
+    # AFL rounds span ~4 days (Thu-Sun), so exclude all matches within
+    # 7 days of the latest match to capture the full round.
     sorted_played = played.sort_values("date")
     last_date = sorted_played["date"].max()
-    if "round" in sorted_played.columns:
-        last_season = sorted_played["season"].max()
-        season_hist = sorted_played[sorted_played["season"] == last_season]
-        last_round = season_hist["round"].max()
-        prev_hist = sorted_played[~((sorted_played["season"] == last_season) & (sorted_played["round"] == last_round))]
-    else:
-        prev_hist = sorted_played[sorted_played["date"] < last_date]
+    round_cutoff = last_date - pd.Timedelta(days=7)
+    prev_hist = sorted_played[sorted_played["date"] <= round_cutoff]
 
     prev_elos = compute_current_elos(prev_hist, k=ELO_K, home_adv=ELO_HOME_ADV, base=ELO_BASE)
 
