@@ -67,26 +67,27 @@ def build_model(team_log):
     feats = make_feature_list(team_log, MODEL_STATS, FORM_WINDOWS)
     model, (a, b) = train_and_calibrate(hist, feats, TRAIN_THROUGH, CALIB_SEASON)
     train_hist = hist[hist["season"] <= TRAIN_THROUGH].copy()
-    return model, a, b, feats, train_hist
+    return model, a, b, feats, train_hist, hist
 
 
 @st.cache_data(show_spinner="Computing team ratings...")
-def build_elo_and_form(train_hist, team_log):
-    elos = compute_current_elos(train_hist, k=ELO_K, home_adv=ELO_HOME_ADV, base=ELO_BASE)
+def build_elo_and_form(train_hist, full_hist, team_log):
+    # ELOs for predictions use all played matches (including 2026 results)
+    # so that ratings reflect the latest round outcomes.
+    played = full_hist[full_hist["home_win"].notna()].copy()
+    elos = compute_current_elos(played, k=ELO_K, home_adv=ELO_HOME_ADV, base=ELO_BASE)
     snap = latest_form_snapshot(team_log, model_stats=MODEL_STATS, form_windows=FORM_WINDOWS)
 
     # Compute previous-round ELOs by excluding the last round of matches
-    sorted_hist = train_hist.sort_values("date")
-    last_date = sorted_hist["date"].max()
-    # Find the last round: all matches on or after the last unique round date
-    if "round" in sorted_hist.columns:
-        last_season = sorted_hist["season"].max()
-        season_hist = sorted_hist[sorted_hist["season"] == last_season]
+    sorted_played = played.sort_values("date")
+    last_date = sorted_played["date"].max()
+    if "round" in sorted_played.columns:
+        last_season = sorted_played["season"].max()
+        season_hist = sorted_played[sorted_played["season"] == last_season]
         last_round = season_hist["round"].max()
-        prev_hist = sorted_hist[~((sorted_hist["season"] == last_season) & (sorted_hist["round"] == last_round))]
+        prev_hist = sorted_played[~((sorted_played["season"] == last_season) & (sorted_played["round"] == last_round))]
     else:
-        # Fallback: exclude matches from the last date
-        prev_hist = sorted_hist[sorted_hist["date"] < last_date]
+        prev_hist = sorted_played[sorted_played["date"] < last_date]
 
     prev_elos = compute_current_elos(prev_hist, k=ELO_K, home_adv=ELO_HOME_ADV, base=ELO_BASE)
 
@@ -168,8 +169,8 @@ except FileNotFoundError as exc:
     st.error(str(exc))
     st.stop()
 
-model, platt_a, platt_b, feats, train_hist = build_model(team_log)
-elos, snap, prev_elos, last_match_date = build_elo_and_form(train_hist, team_log)
+model, platt_a, platt_b, feats, train_hist, full_hist = build_model(team_log)
+elos, snap, prev_elos, last_match_date = build_elo_and_form(train_hist, full_hist, team_log)
 
 # Filter to predict season
 fx_2026 = all_fixtures[all_fixtures["season"] == PREDICT_SEASON].copy()
