@@ -74,7 +74,23 @@ def build_model(team_log):
 def build_elo_and_form(train_hist, team_log):
     elos = compute_current_elos(train_hist, k=ELO_K, home_adv=ELO_HOME_ADV, base=ELO_BASE)
     snap = latest_form_snapshot(team_log, model_stats=MODEL_STATS, form_windows=FORM_WINDOWS)
-    return elos, snap
+
+    # Compute previous-round ELOs by excluding the last round of matches
+    sorted_hist = train_hist.sort_values("date")
+    last_date = sorted_hist["date"].max()
+    # Find the last round: all matches on or after the last unique round date
+    if "round" in sorted_hist.columns:
+        last_season = sorted_hist["season"].max()
+        season_hist = sorted_hist[sorted_hist["season"] == last_season]
+        last_round = season_hist["round"].max()
+        prev_hist = sorted_hist[~((sorted_hist["season"] == last_season) & (sorted_hist["round"] == last_round))]
+    else:
+        # Fallback: exclude matches from the last date
+        prev_hist = sorted_hist[sorted_hist["date"] < last_date]
+
+    prev_elos = compute_current_elos(prev_hist, k=ELO_K, home_adv=ELO_HOME_ADV, base=ELO_BASE)
+
+    return elos, snap, prev_elos, last_date
 
 
 # ── Prediction (uncached — runs on each button click) ─────────────────────────
@@ -153,7 +169,7 @@ except FileNotFoundError as exc:
     st.stop()
 
 model, platt_a, platt_b, feats, train_hist = build_model(team_log)
-elos, snap = build_elo_and_form(train_hist, team_log)
+elos, snap, prev_elos, last_match_date = build_elo_and_form(train_hist, team_log)
 
 # Filter to predict season
 fx_2026 = all_fixtures[all_fixtures["season"] == PREDICT_SEASON].copy()
@@ -276,3 +292,45 @@ if st.button("Generate Tips", type="primary"):
         file_name=f"afl_tips_2026_r{selected_round}.csv",
         mime="text/csv",
     )
+
+# ── ELO Ratings Table ────────────────────────────────────────────────────────
+st.markdown("---")
+st.subheader("Current ELO Ratings")
+
+# Show data freshness
+if last_match_date is not None:
+    if hasattr(last_match_date, "strftime"):
+        date_str = last_match_date.strftime("%a %d %b %Y")
+    else:
+        date_str = str(last_match_date)
+    st.caption(f"ELO ratings updated through: **{date_str}**")
+
+# Build ELO comparison table
+all_teams = sorted(elos.keys())
+elo_rows = []
+for team in all_teams:
+    cur = elos.get(team, ELO_BASE)
+    prev = prev_elos.get(team, ELO_BASE)
+    change = cur - prev
+    elo_rows.append({
+        "Team": team,
+        "Current ELO": round(cur, 1),
+        "Previous Round ELO": round(prev, 1),
+        "Change": round(change, 1),
+    })
+
+elo_df = pd.DataFrame(elo_rows).sort_values("Current ELO", ascending=False).reset_index(drop=True)
+elo_df.insert(0, "Rank", range(1, len(elo_df) + 1))
+
+st.dataframe(
+    elo_df,
+    hide_index=True,
+    use_container_width=True,
+    column_config={
+        "Rank": st.column_config.NumberColumn("Rank", format="%d"),
+        "Team": st.column_config.TextColumn("Team"),
+        "Current ELO": st.column_config.NumberColumn("Current ELO", format="%.1f"),
+        "Previous Round ELO": st.column_config.NumberColumn("Prev Round ELO", format="%.1f"),
+        "Change": st.column_config.NumberColumn("Change", format="%+.1f"),
+    },
+)
