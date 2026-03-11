@@ -1,3 +1,4 @@
+import logging
 import os
 import sys
 from datetime import date
@@ -125,6 +126,24 @@ def run_prediction(round_fx, edited_odds, model, platt_a, platt_b, feats, elos, 
 # ── App layout ────────────────────────────────────────────────────────────────
 st.set_page_config(page_title="AFL 2026 Tips", layout="wide")
 st.title("AFL 2026 — Weekly Tips")
+
+# ── Auto-scrape latest match results on startup ─────────────────────────────
+# Runs once per process (survives Streamlit reruns, resets on deploy/wake).
+# Updates afl_team_rows.csv with any new match results so ELO stays current.
+import scrape_afl_tables as _scraper
+
+if not getattr(_scraper, "_scrape_done", False):
+    with st.spinner("Checking for new match results from AFL Tables..."):
+        try:
+            season = date.today().year
+            _scraper.update_season_incremental(season, TEAM_CACHE)
+            # Clear cached data so model retrains with updated results
+            load_data.clear()
+            build_model.clear()
+            build_elo_and_form.clear()
+        except Exception as exc:
+            logging.warning("Auto-scrape failed: %s", exc)
+        _scraper._scrape_done = True
 
 # Load + train (cached after first run)
 try:
